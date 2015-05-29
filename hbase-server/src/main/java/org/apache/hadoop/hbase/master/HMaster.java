@@ -781,6 +781,11 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
     // master initialization. See HBASE-5916.
     this.serverManager.clearDeadServersWithSameHostNameAndPortOfOnlineServer();
 
+    // Check and set the znode ACLs if needed in case we are overtaking a non-secure configuration
+    status.setStatus("Checking ZNode ACLs");
+    zooKeeper.checkAndSetZNodeAcls();
+
+    status.setStatus("Calling postStartMaster coprocessors");
     if (this.cpHost != null) {
       // don't let cp initialization errors kill the master
       try {
@@ -1097,8 +1102,11 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
     final int numThreads = conf.getInt(MasterProcedureConstants.MASTER_PROCEDURE_THREADS,
         Math.max(Runtime.getRuntime().availableProcessors(),
           MasterProcedureConstants.DEFAULT_MIN_MASTER_PROCEDURE_THREADS));
+    final boolean abortOnCorruption = conf.getBoolean(
+        MasterProcedureConstants.EXECUTOR_ABORT_ON_CORRUPTION,
+        MasterProcedureConstants.DEFAULT_EXECUTOR_ABORT_ON_CORRUPTION);
     procedureStore.start(numThreads);
-    procedureExecutor.start(numThreads);
+    procedureExecutor.start(numThreads, abortOnCorruption);
   }
 
   private void stopProcedureExecutor() {
@@ -1534,7 +1542,7 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
           // HBASE-5680: Likely hadoop23 vs hadoop 20.x/1.x incompatibility
           if (t instanceof NoClassDefFoundError &&
               t.getMessage()
-                  .contains("org/apache/hadoop/hdfs/protocol/FSConstants$SafeModeAction")) {
+                  .contains("org/apache/hadoop/hdfs/protocol/HdfsConstants$SafeModeAction")) {
             // improved error message for this special case
             abort("HBase is having a problem with its Hadoop jars.  You may need to "
               + "recompile HBase against Hadoop version "
